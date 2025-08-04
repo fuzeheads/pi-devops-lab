@@ -1,0 +1,87 @@
+# pi-devops-lab
+
+A homelab setup built on Raspberry Pi and modern DevOps tooling. This repo serves as a playground for testing deployment strategies, automation, and infrastructure-as-code — all within a compact and low-cost environment.
+
+## 📦 Project Structure
+
+```text
+pi-devops-lab/
+├── docker/        # Container configurations
+├── docs/          # Technical documentation and setup guides
+├── helm/          # Helm charts for deploying applications
+├── infra/         # Terraform scripts and infra-as-code tools
+├── k8s/           # Kubernetes manifests and orchestration
+└── README.md      # Project overview
+```
+
+## 🚀 Technologies
+
+- Docker & Docker Compose  
+- Kubernetes (via k3s or microk8s)  
+- Helm for package management  
+- Terraform for infrastructure provisioning  
+- CI/CD setup with GitHub Actions
+
+## 🧰 Goals
+
+- Simulate real-world deployment flows on local hardware  
+- Improve infrastructure skills using a tangible environment  
+- Build and maintain modular and scalable lab architecture  
+- Experiment with automation, monitoring, and container orchestration
+
+## 🌱 Getting Started
+
+1. Clone the repo:
+   ```bash
+   git clone https://github.com/fuzeheads/pi-devops-lab.git
+   ```
+
+2. Explore the folders and follow setup guides in docs/
+
+3. Run local Docker stacks or deploy Helm charts to your Pi Kubernetes cluster
+
+## 👨‍🔬 Author
+
+Created and maintained by Diego S. This repo reflects ongoing work and personal experimentation in modern DevOps practices.
+
+---
+
+
+
+
+## 💾 Raspberry Pi Backup and Restore (Full Disk via SSH) - Optional
+
+This section explains how to **create** and **restore** a compressed full-disk image of your Raspberry Pi remotely over SSH.
+
+
+### 📦 Creating the Backup
+
+Run this command from your laptop to pull the full SD card image from the Raspberry Pi over SSH:
+
+```bash
+ssh <your-username>@<your-pi-ip> "sudo dd if=/dev/mmcblk0 bs=4M status=progress" | dd of=raspi.img bs=4M status=progress
+```
+
+Replace <your-username> with your actual Pi user
+
+Replace <your-pi-ip> with the Pi's IP address
+
+mmcblk0 is usually the SD card device (verify with lsblk if needed)
+
+Then compress the image:
+```bash
+gzip raspi.img
+```
+The result will be a file named raspi.img.gz, which contains your full Raspberry Pi setup.
+
+## # 🔁 Restoring the Backup
+To write the compressed image back to an SD card:
+```bash
+gzip -dc raspi.img.gz | sudo dd of=/dev/sdX bs=4M status=progress
+```
+
+Replace sdX with your SD card device name (use lsblk to check)
+
+Be very careful not to overwrite the wrong disk
+
+This restores the Pi exactly as it was at the time of backup.
