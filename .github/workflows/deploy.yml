@@ -1,0 +1,31 @@
+name: Deploy Pi-hole
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    name: Deploy to Raspberry Pi
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Deploy via SSH
+      uses: appleboy/ssh-action@master
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USER }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        script: |
+          cd ~/pi-devops-lab/docker/pi-hole
+          echo "PIHOLE_IMAGE=pihole/pihole:latest" > .env
+          echo "PLATFORM=linux/arm64" >> .env
+          echo "TZ=Europe/Amsterdam" >> .env
+          echo "FTLCONF_WEBPASSWORD=${{ secrets.PIHOLE_WEBPASSWORD }}" >> .env
+
+          docker compose pull
+          docker compose down
+          docker compose up -d
