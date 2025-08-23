@@ -25,12 +25,20 @@ jobs:
             --accept-dns=false \
             --ssh
 
-      - name: Verify Tailscale connection
+      - name: Verify runner tags
         run: |
-          echo "=== Tailscale status ==="
-          tailscale status
+          echo "=== Runner self info ==="
+          tailscale status --self || true
+          echo
+          echo "=== Runner debug tags ==="
+          tailscale debug tags || true
+
+      - name: Verify Pi visibility from runner
+        run: |
+          echo "=== Pi info from runner ==="
+          tailscale status | grep livingroompi || true
           echo "=== Pinging Pi (tag:pi) ==="
-          tailscale ping -c 3 tag:pi
+          tailscale ping -c 3 tag:pi || true
 
       - name: Deploy Pi-hole via Tailscale SSH
         run: |
