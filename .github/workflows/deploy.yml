@@ -6,26 +6,44 @@ on:
 
 jobs:
   deploy:
-    name: Deploy to Raspberry Pi
+    name: Deploy to Raspberry Pi via Tailscale SSH
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-    - name: Deploy via SSH
-      uses: appleboy/ssh-action@master
-      with:
-        host: ${{ secrets.SSH_HOST }}
-        username: ${{ secrets.SSH_USER }}
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
-        script: |
-          cd ~/pi-devops-lab/docker/pi-hole
-          echo "PIHOLE_IMAGE=pihole/pihole:latest" > .env
-          echo "PLATFORM=linux/arm64" >> .env
-          echo "TZ=Europe/Amsterdam" >> .env
-          echo "WEBPASSWORD=${{ secrets.PIHOLE_WEBPASSWORD }}" >> .env
+      - name: Install Tailscale & join tailnet
+        env:
+          TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
+        run: |
+          curl -fsSL https://tailscale.com/install.sh | sh
+          sudo tailscale up \
+            --authkey $TAILSCALE_AUTHKEY \
+            --hostname gha-runner \
+            --accept-dns=false
 
-          docker compose pull
-          docker compose down
-          docker compose up -d
+      - name: Install SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+
+      - name: Deploy Pi-hole
+        run: |
+          ssh \
+            -o "ProxyCommand tailscale ssh-proxy %h" \
+            -i ~/.ssh/id_rsa \
+            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'EOF'
+            cd ~/pi-devops-lab/docker/pi-hole
+            cat > .env <<EOT
+            PIHOLE_IMAGE=pihole/pihole:latest
+            PLATFORM=linux/arm64
+            TZ=Europe/Amsterdam
+            WEBPASSWORD=${{ secrets.PIHOLE_WEBPASSWORD }}
+            EOT
+
+            docker compose pull
+            docker compose down
+            docker compose up -d
+          EOF
