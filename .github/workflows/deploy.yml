@@ -24,7 +24,7 @@ jobs:
           echo "PIHOLE_IMAGE=pihole/pihole:latest" > .env
           echo "PLATFORM=linux/arm64" >> .env
           echo "TZ=Europe/Amsterdam" >> .env
-          echo "FTLCONF_WEBPASSWORD=${{ secrets.PIHOLE_WEBPASSWORD }}" >> .env
+          echo "WEBPASSWORD=${{ secrets.PIHOLE_WEBPASSWORD }}" >> .env
 
           docker compose pull
           docker compose down
