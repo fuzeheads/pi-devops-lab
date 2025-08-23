@@ -21,12 +21,20 @@ jobs:
           sudo tailscale up \
             --authkey $TAILSCALE_AUTHKEY \
             --hostname gha-runner \
+            --advertise-tags=tag:ci-runner \
             --accept-dns=false \
             --ssh
 
+      - name: Verify Tailscale connection
+        run: |
+          echo "=== Tailscale status ==="
+          tailscale status
+          echo "=== Pinging Pi (tag:pi) ==="
+          tailscale ping -c 3 tag:pi
+
       - name: Deploy Pi-hole via Tailscale SSH
         run: |
-          sudo tailscale ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'EOF'
+          sudo tailscale ssh pi@tag:pi << 'EOF'
           cd ~/pi-devops-lab/docker/pi-hole
           cat > .env <<EOT
           PIHOLE_IMAGE=pihole/pihole:latest
