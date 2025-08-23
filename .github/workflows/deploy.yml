@@ -13,7 +13,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Install Tailscale & join tailnet
+      - name: Install Tailscale & join tailnet with SSH enabled
         env:
           TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
         run: |
@@ -21,29 +21,21 @@ jobs:
           sudo tailscale up \
             --authkey $TAILSCALE_AUTHKEY \
             --hostname gha-runner \
-            --accept-dns=false
+            --accept-dns=false \
+            --ssh
 
-      - name: Install SSH key
+      - name: Deploy Pi-hole via Tailscale SSH
         run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
+          sudo tailscale ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'EOF'
+          cd ~/pi-devops-lab/docker/pi-hole
+          cat > .env <<EOT
+          PIHOLE_IMAGE=pihole/pihole:latest
+          PLATFORM=linux/arm64
+          TZ=Europe/Amsterdam
+          WEBPASSWORD=${{ secrets.PIHOLE_WEBPASSWORD }}
+          EOT
 
-      - name: Deploy Pi-hole
-        run: |
-          ssh \
-            -o "ProxyCommand tailscale ssh-proxy %h" \
-            -i ~/.ssh/id_rsa \
-            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'EOF'
-            cd ~/pi-devops-lab/docker/pi-hole
-            cat > .env <<EOT
-            PIHOLE_IMAGE=pihole/pihole:latest
-            PLATFORM=linux/arm64
-            TZ=Europe/Amsterdam
-            WEBPASSWORD=${{ secrets.PIHOLE_WEBPASSWORD }}
-            EOT
-
-            docker compose pull
-            docker compose down
-            docker compose up -d
+          docker compose pull
+          docker compose down
+          docker compose up -d
           EOF
