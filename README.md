@@ -1,227 +1,179 @@
 # pi-devops-lab
 
-A homelab DevOps lab built on a single **Raspberry Pi 4** that serves two roles at once:
+A homelab DevOps lab on a single **Raspberry Pi 4** that plays two roles at once:
 
-1. **Physical Edge Kiosk** — a wall-mounted full-screen display running Chromium, autostarted via Wayfire (Wayland).
-2. **Containerized Homelab Node** — Docker-managed workloads running **Pi-hole** (network DNS sinkhole) and **Nextcloud** (cloud storage).
+1. **Living-room kiosk** — a wall-mounted HDMI display showing **DAKboard** (Google Calendar + weather + Google Keep notes), driven by native Chromium via Wayfire.
+2. **Containerized homelab node** — **Pi-hole** (network-wide DNS ad-blocking) running in Docker, deployed via GitHub Actions over a Tailscale tunnel.
 
-This repo is the single source of truth for the node. It is intentionally scoped to **one Pi, two containers, one GitOps pipeline** — kept rock-solid before scaling toward Kubernetes (Rancher + Fleet).
+Scope is deliberately kept to **one Pi, one service (Pi-hole), one kiosk, one GitOps pipeline** — rock-solid before scaling to the main homelab node and Kubernetes (Rancher + Fleet).
 
-> 📌 **Documentation discipline:** This README is updated with **every commit** that changes infrastructure, config, or process. Keeping it current is what makes this project reliable and rebuildable. If a change isn't reflected here, it isn't done.
+> 📌 **Documentation discipline:** update this README **in the same commit** as any infra/config/process change. Undocumented changes count as unfinished. This is what makes the lab reliable and rebuildable.
 
 ---
 
-## 🧭 Architecture
+## 🧭 Design principles
+
+- **Containerize services; keep the display native.** Pi-hole (and later DAKboard's backend) are containers. The kiosk browser is native Chromium because it must reliably drive the Pi's physical HDMI on every boot — a containerized browser rendering to real HDMI on a Pi is fragile.
+- **Everything version-controlled in Git**, even the native bits (`kiosk/wayfire.ini`).
+- **Secrets: rotate, never recover.** GitHub secrets are write-only. If you don't know a secret's value, replace it — don't try to read it.
+- **Self-healing on reboot.** A power cycle (smart plug) or nightly reboot must bring back DNS + the calendar with zero manual steps.
+
+---
+
+## 🏗️ Architecture
 
 ```
-Push to main → GitHub Actions → SSH via Tailscale tunnel → Docker Compose deploy on Pi
-```
+Push to main → GitHub Actions → Tailscale SSH → Pi:
+   ├─ docker compose up  → Pi-hole (DNS, container)
+   └─ render DAKBOARD_URL → ~/.config/wayfire.ini (native kiosk)
 
-### Stack
+On boot: Docker → Pi-hole (DNS live) → Wayfire → Chromium → DAKboard on the wall
+```
 
 | Layer | Technology |
 | --- | --- |
-| **Host OS** | Raspberry Pi OS 64-bit (Desktop / Wayfire compositor) |
-| **Network** | TP-Link Archer BE550 (DHCP Reservation enforced) |
-| **Access Control** | Key-based SSH (`ed25519`), WayVNC, Tailscale mesh |
-| **Orchestration** | Docker Compose (interim step prior to Rancher/Fleet Kubernetes migration) |
-| **Services** | Pi-hole (DNS), Nextcloud (storage) |
+| Host OS | Raspberry Pi OS 64-bit (Desktop / Wayfire) |
+| Network | TP-Link Archer BE550 (DHCP reservation for the Pi) |
+| Access | Key-based SSH (`ed25519`), Tailscale mesh + SSH |
+| Orchestration | Docker Compose (interim; → k3s / Rancher Fleet later) |
+| Services | Pi-hole (DNS) |
+| Display | Native Chromium kiosk → DAKboard |
 
 ---
 
-## 🖥️ Infrastructure Baseline
-
-| Property | Value / Configuration |
-| --- | --- |
-| **Node Hardware** | Raspberry Pi 4 |
-| **Hostname** | `homelab-pi` (set via Raspberry Pi Imager) |
-| **Network IP** | Fixed via TP-Link Archer BE550 DHCP Reservation |
-| **Primary Admin Key** | Pop!_OS SSH public key (`~/.ssh/id_ed25519.pub`), injected via Imager |
-| **Password Auth** | Disabled for SSH (public-key authentication enforced) |
-
----
-
-## ✅ Deployment Status
+## 📁 Repository layout
 
 ```
-[x] MicroSD flashed with customized Raspberry Pi OS 64-bit Desktop
-[x] Primary SSH public key injected during image provisioning
-[x] Router DHCP address reservation active and committed to NVRAM
-[x] Router configuration file backed up locally (.bin)
-[ ] Initial SSH verification from Pop!_OS laptop
-[ ] Base system update (apt full-upgrade)
-[ ] Remote management setup (WayVNC + Tailscale)
-[ ] Kiosk autostart configuration (wayfire.ini)
-[ ] Docker Engine installation & systemd-resolved port 53 fix
-[ ] Deployment of Docker Compose stack (Pi-hole + Nextcloud)
-[ ] Secondary SSH keys authorized (iPad & Android devices)
-[ ] Repository initialization & GitOps pipeline tracking
+pi-devops-lab/
+├── .github/workflows/deploy.yml   # CI/CD: deploy Pi-hole + inject kiosk URL
+├── docker/pi-hole/                # Containerized Pi-hole service
+│   ├── docker-compose.yml
+│   └── .env.template
+├── kiosk/                         # Native kiosk (Git-controlled)
+│   ├── wayfire.ini                # Autostart Chromium → DAKboard (URL injected)
+│   └── README.md
+├── systemd/                       # Host units
+│   ├── nightly-reboot.service
+│   └── nightly-reboot.timer       # Optional scheduled reboot
+├── scripts/pi-bootstrap.sh        # One-shot Pi provisioning (idempotent)
+├── docs/migration.md              # Pi → main node → k8s migration plan
+└── README.md
 ```
 
 ---
 
-## 🚀 Sequential Execution Plan
+## 🔑 Required GitHub Actions secrets
 
-### Step 1 — Base Access & System Hardening
+Set under **Settings → Secrets and variables → Actions**. These are the **only** secrets the pipeline uses:
 
-Connect from Pop!_OS and refresh core repositories:
-
-```bash
-ssh yourusername@RESERVED_PI_IP
-sudo apt update && sudo apt full-upgrade -y
-```
-
-### Step 2 — Remote Access Configuration
-
-Enable native Wayland VNC and join the Tailscale tailnet:
-
-```bash
-# Enable VNC
-sudo raspi-config
-# Interface Options -> VNC -> Enable -> Exit
-
-# Install and authenticate Tailscale
-curl -fsSL https://tailscale.com/install.sh | sh
-sudo tailscale up
-```
-
-### Step 3 — Wayfire Kiosk Display Autostart
-
-Launch Chromium into full-screen kiosk mode on boot. Edit `~/.config/wayfire.ini` and append:
-
-```ini
-[autostart]
-chromium = chromium-browser --start-maximized --start-fullscreen --kiosk --noerrdialogs --disable-infobars "YOUR_CALENDAR_URL_HERE"
-screensaver = false
-dpms = false
-```
-
-### Step 4 — Docker Engine & DNS Host Configuration
-
-Install Docker and free port 53 so Pi-hole can claim native DNS:
-
-```bash
-# Install Docker Engine
-curl -fsSL https://get.docker.com -o get-docker.sh
-sudo sh get-docker.sh
-sudo usermod -aG docker $USER
-newgrp docker
-
-# Disable systemd-resolved DNS stub listener (frees port 53)
-sudo sed -i 's/#DNSStubListener=yes/DNSStubListener=no/' /etc/systemd/resolved.conf
-sudo systemctl restart systemd-resolved
-```
-
-### Step 5 — Stack Deployment
-
-Create `~/containers/homelab/docker-compose.yml`:
-
-```yaml
-version: '3.8'
-
-services:
-  pihole:
-    container_name: pihole
-    image: pihole/pihole:latest
-    ports:
-      - "53:53/tcp"
-      - "53:53/udp"
-      - "8080:80/tcp"
-    environment:
-      TZ: 'Europe/Amsterdam'
-      FTLCONF_LOCAL_IPV4: '0.0.0.0'
-    volumes:
-      - './etc-pihole:/etc/pihole'
-      - './etc-dnsmasq.d:/etc/dnsmasq.d'
-    restart: unless-stopped
-
-  nextcloud:
-    container_name: nextcloud
-    image: lscr.io/linuxserver/nextcloud:latest
-    ports:
-      - "80:80"
-      - "443:443"
-    environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=Europe/Amsterdam
-    volumes:
-      - './nextcloud/config:/config'
-      - './nextcloud/data:/data'
-    restart: unless-stopped
-```
-
-Deploy:
-
-```bash
-cd ~/containers/homelab
-docker compose up -d
-```
-
-### Step 6 — Authorize Additional Devices
-
-Generate an `ed25519` key pair in Termius/Blink/JuiceSSH on iPad and Android, then append each public key:
-
-```bash
-nano ~/.ssh/authorized_keys
-# Paste new public key on a new line, save and exit.
-```
-
----
-
-## 🗺️ Roadmap: From Docker Compose to Rancher + Fleet
-
-This lab is a deliberate stepping stone toward a production-style **Rancher + Fleet** GitOps workflow (the same pattern targeted for Scaleway VMs/containers). Each stage teaches a skill needed for that work.
-
-| Stage | Goal | Skill gained |
+| Secret | Purpose | Notes |
 | --- | --- | --- |
-| **1. Compose works locally** | Pi-hole + Nextcloud stable on one Pi via Docker Compose | Container fundamentals, host hardening, DNS |
-| **2. Compose → Kubernetes manifests** | Convert `docker-compose.yml` to k8s manifests (via `kompose` or manual refactor), run on local `k3s` | Kubernetes objects, lightweight cluster ops |
-| **3. GitOps with Fleet** | Commit manifests to Git; register the repo with **Rancher Fleet** for continuous, reconciled deployment | GitOps discipline (Git = source of truth, no manual `kubectl`) |
-| **4. Scale to Scaleway** | Apply the same Rancher/Fleet pattern on Scaleway VMs/containers for the work project | Cloud cluster provisioning, multi-node fleets |
+| `TAILSCALE_AUTHKEY` | CI runner joins your tailnet to reach the Pi | Tailscale keys **expire** — regenerate if old |
+| `PIHOLE_WEBPASSWORD` | Pi-hole admin password | Store a copy in your password manager |
+| `DAKBOARD_URL` | Your DAKboard display URL | Treated as a secret; never committed |
 
-**Principle:** Do not over-scope. Keep this to one Pi, two containers, one pipeline until it is rock-solid. Add the Kubernetes/Fleet layer only when Stage 1 is genuinely stable.
-
----
-
-## 🆘 What If You Get Lost Again? (Recovery Runbook)
-
-> This project was once disrupted by a lost microSD card and a forgotten repo. This section exists so that **never kills the project again.** If you return after months, or the hardware dies, start here.
-
-### Recovery mindset
-
-The old recovery plan was a raw SD-card `dd` image — which is exactly what failed when the card was lost. **The new recovery model is: the repo rebuilds the node, not a disk clone.** A lost card should be a ~20-minute rebuild, not a dead project.
-
-### Rebuild from zero
-
-1. **Flash a fresh microSD** with Raspberry Pi OS 64-bit Desktop using Raspberry Pi Imager.
-   - Set hostname to `homelab-pi`.
-   - Inject your Pop!_OS SSH public key (`~/.ssh/id_ed25519.pub`).
-   - Disable password authentication.
-2. **Restore the network reservation** on the TP-Link Archer BE550 (restore the backed-up `.bin` config, or re-add the DHCP reservation for the Pi's MAC).
-3. **Clone this repo** and follow the [Sequential Execution Plan](#-sequential-execution-plan) top to bottom.
-4. **Re-authenticate Tailscale** (`sudo tailscale up`) to bring the node back onto the tailnet.
-5. **Redeploy the stack** (`docker compose up -d`). Service config lives in Git; only secrets and persistent volumes are node-local.
-
-### What must live OUTSIDE the Pi (so it survives hardware loss)
-
-- ✅ This repo (compose files, config, this README) — in Git.
-- ✅ SSH **public** keys — recorded here / in your key manager.
-- ✅ Router config backup (`.bin`) — stored off-device.
-- ⚠️ **Secrets** (Pi-hole/Nextcloud passwords) — in GitHub Actions Secrets or a password manager, **never** committed.
-- ⚠️ **Nextcloud data volume** — needs a real backup strategy (planned: Restic/Borg to off-device storage).
-
-### If you've simply forgotten the project
-
-Read this README top to bottom, check the **Deployment Status** checklist for where you left off, then resume the Execution Plan at the first unchecked item.
+> 🧹 **Remove obsolete secrets.** Earlier `SSH_HOST`, `SSH_USER`, `SSH_PRIVATE_KEY` are **not used** (deploy is over Tailscale SSH). Delete them.
 
 ---
 
-## 🔁 Keeping This Document Reliable
+## 🚀 Reproduce this setup (Pi or a friend's homelab)
 
-- Update this README **in the same commit** as any infra/config/process change.
-- Tick the **Deployment Status** boxes as steps complete.
-- Treat undocumented changes as unfinished work.
+Once the SD is flashed, the whole scenario is **three actions**: run one bootstrap command on the Pi, set three secrets on GitHub, push to main. Everything else lives in Git.
+
+Legend: **💻 LAPTOP** = your computer/browser · **🍓 PI** = terminal on the Pi (SSH).
+
+### Phase 0 — Bootstrap (makes the pipeline reachable)
+
+1. **🍓 PI** — join Tailscale with the tag/hostname the pipeline targets:
+   ```bash
+   sudo tailscale up --advertise-tags=tag:pi --ssh --hostname livingroompi
+   tailscale status --self
+   ```
+2. **💻 LAPTOP** — Tailscale admin → **Access Controls**: ensure `tag:pi` exists with you as `tagOwner`. *(Already configured for this lab.)*
+3. **💻 LAPTOP** — GitHub → Secrets → Actions: set `TAILSCALE_AUTHKEY`, `PIHOLE_WEBPASSWORD`, `DAKBOARD_URL` (see table above).
+4. **🍓 PI** — run the one-shot bootstrap (port-53 fix, Docker, boot-enable, clone, kiosk config):
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/fuzeheads/pi-devops-lab/main/scripts/pi-bootstrap.sh | bash
+   ```
+
+### Phase 1 — Deploy Pi-hole via the pipeline
+
+5. **💻 LAPTOP** — push to `main` (or run the workflow manually via **Actions → Run workflow**). Watch the Actions tab.
+6. **🍓 PI** — verify:
+   ```bash
+   docker ps | grep pihole
+   curl -f http://localhost:8080/admin -s --max-time 5 && echo "Pi-hole UI OK"
+   ```
+7. **💻 LAPTOP** — router admin: set the Pi as the LAN DNS server; add it in Tailscale MagicDNS so devices inherit ad-blocking.
+
+### Phase 2 — Living-room calendar (the main goal)
+
+8. **💻 LAPTOP** — build your **DAKboard** dashboard (Google Calendar + weather + Keep), copy the **display URL**, save it as the `DAKBOARD_URL` secret, and re-run the workflow so it's injected into `wayfire.ini`.
+9. **🍓 PI** — reboot and confirm the wall shows DAKboard:
+   ```bash
+   sudo reboot
+   ```
+
+---
+
+## 🌐 DNS architecture (now → later)
+
+- **Now (Pi = front line):** Pi-hole owns port 53 on the Pi (`systemd-resolved` stub listener disabled by the bootstrap — persistent across reboots). Clients get Pi-hole via **router DHCP** (whole LAN, new devices auto-inherit ad-blocking) and **Tailscale MagicDNS** (follows you off-home).
+- **Later (main node = cavalry):** Pi-hole migrates to the main node. Because config lives in Git, migration is: clone repo → `docker compose up -d` → repoint DHCP + MagicDNS to the new IP. No redesign. See [`docs/migration.md`](docs/migration.md).
+
+---
+
+## ♻️ Reboot resilience
+
+The Pi must return to a working state after any restart (smart-plug power cycle or the optional nightly reboot) with **no manual steps**:
+
+1. **Docker** is enabled at boot → starts automatically.
+2. **Pi-hole** has `restart: unless-stopped` → relaunches → DNS live.
+3. **Port 53** fix is persistent in `/etc/systemd/resolved.conf`.
+4. **Wayfire** autostarts **Chromium** → DAKboard fills the screen.
+
+Optional nightly reboot (keeps the Pi snappy) via `systemd/nightly-reboot.timer`:
+```bash
+ENABLE_NIGHTLY_REBOOT=yes bash ~/pi-devops-lab/scripts/pi-bootstrap.sh
+# or: sudo cp systemd/nightly-reboot.* /etc/systemd/system/ && sudo systemctl enable --now nightly-reboot.timer
+```
+> If your smart plug already power-cycles the Pi/monitor overnight, you may not need the timer at all.
+
+---
+
+## 🗺️ Roadmap: Docker Compose → Rancher + Fleet
+
+| Stage | Goal |
+| --- | --- |
+| 1. Compose (now) | Pi-hole + kiosk stable on one Pi |
+| 2. Split & conquer | Move Pi-hole, add **Nextcloud** + **Traefik** (80/443 reverse proxy), optionally self-host **DAKboard backend** on the main node; Pi stays the kiosk |
+| 3. Compose → k8s | Convert to manifests (`kompose`), run on local **k3s** |
+| 4. GitOps with Fleet | Register repo with **Rancher Fleet** for reconciled deploys |
+| 5. Scaleway | Apply the same Rancher/Fleet pattern on Scaleway VMs/containers |
+
+**Principle:** don't over-scope — keep Pi-hole + kiosk rock-solid before adding Kubernetes.
+
+---
+
+## 🆘 What If You Get Lost Again? (Recovery runbook)
+
+> This project was once disrupted by a lost microSD and a forgotten repo. This section ensures that never kills it again.
+
+**Recovery model:** the **repo rebuilds the node**, not a disk clone. A lost card is a ~20-minute rebuild.
+
+**Rebuild from zero:**
+1. Flash a fresh SD (Raspberry Pi Imager): hostname `livingroompi`, inject your SSH public key, disable password auth.
+2. Restore the router DHCP reservation for the Pi (or re-add by MAC).
+3. **🍓 PI:** run the bootstrap one-liner (Phase 0, step 4).
+4. **🍓 PI:** `sudo tailscale up --advertise-tags=tag:pi --ssh --hostname livingroompi`.
+5. **💻 LAPTOP:** confirm the three secrets exist (rotate `TAILSCALE_AUTHKEY` if expired), push to `main`.
+
+**What must live OUTSIDE the Pi (survives hardware loss):**
+- ✅ This repo (compose, kiosk config, docs) — in Git.
+- ✅ SSH **public** keys + router config backup — off-device.
+- ⚠️ Secrets (`PIHOLE_WEBPASSWORD`, `DAKBOARD_URL`, `TAILSCALE_AUTHKEY`) — password manager / GitHub Secrets, **never** committed.
+
+**If you simply forgot the project:** read this README top to bottom, then resume at the first unfinished phase above.
 
 ---
 
