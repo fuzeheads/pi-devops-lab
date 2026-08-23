@@ -1,17 +1,17 @@
-name: Deploy Pi-hole
+name: Deploy pi-devops-lab (Pi-hole + Kiosk config)
 
 on:
   push:
     branches: [main]
+  workflow_dispatch: {}
 
 jobs:
   deploy:
     name: Deploy to Raspberry Pi via Tailscale SSH
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Install Tailscale & join tailnet with SSH enabled
         env:
@@ -19,39 +19,45 @@ jobs:
         run: |
           curl -fsSL https://tailscale.com/install.sh | sh
           sudo tailscale up \
-            --authkey $TAILSCALE_AUTHKEY \
+            --authkey "$TAILSCALE_AUTHKEY" \
             --hostname gha-runner \
             --advertise-tags=tag:ci-runner \
             --accept-dns=false \
             --ssh
 
-      - name: Verify runner tags
-        run: |
-          echo "=== Runner self info ==="
-          tailscale status --self || true
-          echo
-          echo "=== Runner debug tags ==="
-          tailscale debug tags || true
-
       - name: Verify Pi visibility from runner
         run: |
-          echo "=== Pi info from runner ==="
           tailscale status | grep livingroompi || true
-          echo "=== Pinging Pi (tag:pi) ==="
           tailscale ping -c 3 tag:pi || true
 
-      - name: Deploy Pi-hole via Tailscale SSH
+      - name: Deploy Pi-hole + inject kiosk URL via Tailscale SSH
+        env:
+          PIHOLE_WEBPASSWORD: ${{ secrets.PIHOLE_WEBPASSWORD }}
+          DAKBOARD_URL: ${{ secrets.DAKBOARD_URL }}
         run: |
-          sudo tailscale ssh pi@tag:pi << 'EOF'
+          sudo tailscale ssh pi@tag:pi \
+            PIHOLE_WEBPASSWORD="$PIHOLE_WEBPASSWORD" \
+            DAKBOARD_URL="$DAKBOARD_URL" \
+            'bash -s' << 'EOF'
+          set -euo pipefail
+          cd ~/pi-devops-lab && git pull --ff-only || true
+
           cd ~/pi-devops-lab/docker/pi-hole
           cat > .env <<EOT
           PIHOLE_IMAGE=pihole/pihole:latest
           PLATFORM=linux/arm64
           TZ=Europe/Amsterdam
-          WEBPASSWORD=${{ secrets.PIHOLE_WEBPASSWORD }}
+          WEBPASSWORD=${PIHOLE_WEBPASSWORD}
           EOT
-
           docker compose pull
-          docker compose down
           docker compose up -d
+
+          mkdir -p "$HOME/.config"
+          cp ~/pi-devops-lab/kiosk/wayfire.ini "$HOME/.config/wayfire.ini"
+          if [ -n "${DAKBOARD_URL:-}" ]; then
+            sed -i "s|__DAKBOARD_URL__|${DAKBOARD_URL}|g" "$HOME/.config/wayfire.ini"
+          fi
           EOF
+
+      - name: Done
+        run: echo "Deploy complete. Pi-hole updated; kiosk points at DAKboard on next graphical boot."
