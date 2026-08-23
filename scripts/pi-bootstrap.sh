@@ -3,7 +3,9 @@
 # pi-bootstrap.sh — one-shot provisioning for the pi-devops-lab node.
 #
 # WHAT IT DOES (idempotent — safe to re-run):
-#   1. Frees port 53 (disables systemd-resolved stub listener) so Pi-hole can bind DNS.
+#   1. Ensures port 53 is free for Pi-hole. On OS images that use systemd-resolved
+#      it disables the stub listener; on Raspberry Pi OS (which typically does NOT
+#      use systemd-resolved) it just verifies 53 is free and moves on.
 #   2. Installs Docker Engine and enables it at boot.
 #   3. Adds the current user to the docker group.
 #   4. Clones (or updates) this repo to ~/pi-devops-lab.
@@ -24,15 +26,32 @@ ENABLE_NIGHTLY_REBOOT="${ENABLE_NIGHTLY_REBOOT:-no}"   # set to "yes" to install
 log() { printf '\n\033[1;32m==>\033[0m %s\n' "$*"; }
 
 # ---------------------------------------------------------------------------
-# 1. Free port 53 for Pi-hole (persistent across reboots)
+# 1. Ensure port 53 is free for Pi-hole
+#    Different OS images handle DNS differently:
+#      - Ubuntu / some images use systemd-resolved (holds port 53) -> disable stub.
+#      - Raspberry Pi OS typically does NOT use systemd-resolved    -> nothing to do.
+#    This step must never abort the whole run.
 # ---------------------------------------------------------------------------
-log "Freeing port 53 (systemd-resolved stub listener off)"
-if grep -q '^#\?DNSStubListener=' /etc/systemd/resolved.conf; then
-  sudo sed -i 's/^#\?DNSStubListener=.*/DNSStubListener=no/' /etc/systemd/resolved.conf
+log "Ensuring port 53 is free for Pi-hole"
+if systemctl is-active --quiet systemd-resolved 2>/dev/null || [ -f /etc/systemd/resolved.conf ]; then
+  log "systemd-resolved detected -> disabling DNS stub listener"
+  if [ -f /etc/systemd/resolved.conf ] && grep -q '^#\?DNSStubListener=' /etc/systemd/resolved.conf; then
+    sudo sed -i 's/^#\?DNSStubListener=.*/DNSStubListener=no/' /etc/systemd/resolved.conf
+  else
+    echo 'DNSStubListener=no' | sudo tee -a /etc/systemd/resolved.conf >/dev/null
+  fi
+  sudo systemctl restart systemd-resolved || true
 else
-  echo 'DNSStubListener=no' | sudo tee -a /etc/systemd/resolved.conf >/dev/null
+  log "systemd-resolved not in use on this OS -> no stub-listener fix needed"
 fi
-sudo systemctl restart systemd-resolved
+
+# Sanity check: is anything already bound to port 53?
+if sudo ss -tulnp 2>/dev/null | grep -q ':53 '; then
+  log "WARNING: something is already listening on port 53 — investigate before Pi-hole starts:"
+  sudo ss -tulnp | grep ':53 ' || true
+else
+  log "Port 53 is free for Pi-hole ✅"
+fi
 
 # ---------------------------------------------------------------------------
 # 2. Install Docker Engine + enable at boot
