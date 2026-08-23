@@ -35,7 +35,7 @@ jobs:
           PIHOLE_WEBPASSWORD: ${{ secrets.PIHOLE_WEBPASSWORD }}
           DAKBOARD_URL: ${{ secrets.DAKBOARD_URL }}
         run: |
-          sudo tailscale ssh pi@tag:pi \
+          sudo tailscale ssh admin@tag:pi \
             PIHOLE_WEBPASSWORD="$PIHOLE_WEBPASSWORD" \
             DAKBOARD_URL="$DAKBOARD_URL" \
             'bash -s' << 'EOF'
