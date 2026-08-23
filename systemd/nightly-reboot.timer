@@ -1,0 +1,16 @@
+# Schedules the nightly reboot. Edit OnCalendar to a time the screen is unwatched.
+# A reboot blanks the display for ~30-60s while everything comes back up.
+#
+# Install:  sudo systemctl enable --now nightly-reboot.timer
+# Inspect:  systemctl list-timers nightly-reboot.timer
+
+[Unit]
+Description=Run nightly reboot at a quiet hour
+
+[Timer]
+# 04:30 local time every day. Adjust as needed.
+OnCalendar=*-*-* 04:30:00
+Persistent=false
+
+[Install]
+WantedBy=timers.target

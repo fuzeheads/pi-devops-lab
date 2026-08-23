@@ -1,0 +1,15 @@
+# Reboots the Pi to keep it snappy. Triggered by nightly-reboot.timer.
+#
+# OPTIONAL: only installed if you run pi-bootstrap.sh with ENABLE_NIGHTLY_REBOOT=yes.
+# If your smart plug already cuts power to the monitor/Pi overnight, you may not
+# need this at all — the plug's power cycle acts as the reboot.
+#
+# Everything self-heals on boot: Docker (enabled) -> Pi-hole (restart: unless-stopped)
+# -> Wayfire -> Chromium -> DAKboard. So an unattended reboot is safe.
+
+[Unit]
+Description=Nightly reboot to keep the Pi responsive
+
+[Service]
+Type=oneshot
+ExecStart=/sbin/reboot
