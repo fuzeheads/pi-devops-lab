@@ -1,13 +1,9 @@
 #!/bin/sh
-# labwc autostart — launches the DAKboard kiosk on the living-room display.
-# Installed to ~/.config/labwc/autostart by the pipeline/bootstrap.
-# __DAKBOARD_URL__ is replaced at deploy time (never committed).
+# labwc autostart — DAKboard kiosk for the living-room display.
+# Installed to ~/.config/labwc/autostart by bootstrap/pipeline.
+# __DAKBOARD_URL__ is injected at deploy time (never committed).
 
-# Disable screen blanking/DPMS on a wall display.
 swaybg -c '#000000' &
-wlr-randr --output HDMI-A-1 --on 2>/dev/null || true
-
-# Small delay so the compositor is ready, then launch Chromium kiosk.
 sleep 3
 exec chromium \
   --kiosk \
@@ -16,5 +12,6 @@ exec chromium \
   --incognito \
   --disable-session-crashed-bubble \
   --check-for-update-interval=604800 \
+  --password-store=basic \
   --ozone-platform=wayland \
   "__DAKBOARD_URL__"
