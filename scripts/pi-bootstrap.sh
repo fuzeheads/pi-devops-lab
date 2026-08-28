@@ -9,7 +9,8 @@
 #   2. Installs Docker Engine and enables it at boot.
 #   3. Adds the current user to the docker group.
 #   4. Clones (or updates) this repo to ~/pi-devops-lab.
-#   5. Installs the native kiosk (Chromium via Wayfire) that boots into DAKboard.
+#   5. Installs the native kiosk (Chromium via labwc autostart) that boots into DAKboard,
+#      and configures LightDM autologin so the kiosk starts unattended on every boot.
 #   6. Optionally installs the nightly-reboot systemd timer.
 #
 # RUN THIS ON THE PI (over SSH), NOT on your laptop:
@@ -84,20 +85,42 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 4. Install the native kiosk (Chromium via Wayfire autostart)
+# 4. Install the native kiosk (Chromium via labwc autostart)
+#
+#    Raspberry Pi OS / Debian 13 (trixie) ships:
+#      - labwc  : the wlroots Wayland compositor we use for the kiosk
+#      - chromium : the browser binary is 'chromium' (NOT 'chromium-browser')
+#      - LightDM  : the display manager we configure for autologin
+#    We install labwc + a background painter, drop the labwc autostart script
+#    (which launches Chromium in --kiosk with --password-store=basic to avoid the
+#    GNOME Keyring popup), and configure LightDM to autologin into the labwc session.
 # ---------------------------------------------------------------------------
-log "Installing native kiosk config (wayfire.ini)"
-mkdir -p "${HOME}/.config"
-cp "${REPO_DIR}/kiosk/wayfire.ini" "${HOME}/.config/wayfire.ini"
+log "Installing kiosk packages (labwc, swaybg, chromium, wlr-randr)"
+sudo apt-get update -y
+sudo apt-get install -y labwc swaybg chromium wlr-randr
 
-# Render DAKBOARD_URL into the kiosk config if provided in the environment.
+log "Installing labwc autostart (Chromium kiosk -> DAKboard)"
+mkdir -p "${HOME}/.config/labwc"
+cp "${REPO_DIR}/kiosk/labwc-autostart" "${HOME}/.config/labwc/autostart"
+chmod +x "${HOME}/.config/labwc/autostart"
+
+# Render DAKBOARD_URL into the kiosk autostart if provided in the environment.
 if [ -n "${DAKBOARD_URL:-}" ]; then
-  log "Injecting DAKBOARD_URL into wayfire.ini"
-  sed -i "s|__DAKBOARD_URL__|${DAKBOARD_URL}|g" "${HOME}/.config/wayfire.ini"
+  log "Injecting DAKBOARD_URL into labwc autostart"
+  sed -i "s|__DAKBOARD_URL__|${DAKBOARD_URL}|g" "${HOME}/.config/labwc/autostart"
 else
   log "DAKBOARD_URL not set — leaving placeholder. The pipeline will inject it on deploy,"
-  log "or edit ~/.config/wayfire.ini and replace __DAKBOARD_URL__ manually."
+  log "or edit ~/.config/labwc/autostart and replace __DAKBOARD_URL__ manually."
 fi
+
+log "Configuring LightDM autologin into the labwc session (user: admin)"
+sudo mkdir -p /etc/lightdm/lightdm.conf.d
+sudo cp "${REPO_DIR}/kiosk/lightdm-autologin.conf" /etc/lightdm/lightdm.conf.d/50-kiosk-autologin.conf
+# Ensure the autologin user is in the 'autologin' group (required by LightDM).
+sudo groupadd -f autologin
+sudo usermod -aG autologin admin
+# Make sure the Pi boots to the graphical target so LightDM starts.
+sudo systemctl set-default graphical.target
 
 # ---------------------------------------------------------------------------
 # 5. Optional: nightly reboot timer (keeps the Pi snappy)
@@ -115,4 +138,5 @@ fi
 log "Bootstrap complete."
 echo
 echo "Next: push to main (or re-run the GitHub Actions pipeline) to deploy Pi-hole."
-echo "After a reboot the Pi should: start Docker -> Pi-hole (DNS) -> Wayfire -> Chromium -> DAKboard."
+echo "After a reboot the Pi should: start Docker -> Pi-hole (DNS) -> LightDM autologin"
+echo "-> labwc -> Chromium (kiosk) -> DAKboard."
