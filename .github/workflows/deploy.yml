@@ -23,7 +23,6 @@ jobs:
             --hostname gha-runner \
             --advertise-tags=tag:ci-runner \
             --ssh
-          # MagicDNS is enabled so 'livingroompi' resolves. Give it a moment to settle.
           sleep 3
 
       - name: Verify Pi visibility from runner
@@ -53,10 +52,12 @@ jobs:
           docker compose pull
           docker compose up -d
 
-          mkdir -p "$HOME/.config"
-          cp ~/pi-devops-lab/kiosk/wayfire.ini "$HOME/.config/wayfire.ini"
+          # Install / refresh the labwc kiosk autostart and inject the DAKboard URL.
+          mkdir -p "$HOME/.config/labwc"
+          cp ~/pi-devops-lab/kiosk/labwc-autostart "$HOME/.config/labwc/autostart"
+          chmod +x "$HOME/.config/labwc/autostart"
           if [ -n "${DAKBOARD_URL:-}" ]; then
-            sed -i "s|__DAKBOARD_URL__|${DAKBOARD_URL}|g" "$HOME/.config/wayfire.ini"
+            sed -i "s|__DAKBOARD_URL__|${DAKBOARD_URL}|g" "$HOME/.config/labwc/autostart"
           fi
           EOF
 
