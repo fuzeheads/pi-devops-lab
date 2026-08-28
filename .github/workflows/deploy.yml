@@ -22,20 +22,21 @@ jobs:
             --authkey "$TAILSCALE_AUTHKEY" \
             --hostname gha-runner \
             --advertise-tags=tag:ci-runner \
-            --accept-dns=false \
             --ssh
+          # MagicDNS is enabled so 'livingroompi' resolves. Give it a moment to settle.
+          sleep 3
 
       - name: Verify Pi visibility from runner
         run: |
           tailscale status | grep livingroompi || true
-          tailscale ping -c 3 tag:pi || true
+          tailscale ping -c 3 livingroompi || true
 
       - name: Deploy Pi-hole + inject kiosk URL via Tailscale SSH
         env:
           PIHOLE_WEBPASSWORD: ${{ secrets.PIHOLE_WEBPASSWORD }}
           DAKBOARD_URL: ${{ secrets.DAKBOARD_URL }}
         run: |
-          sudo tailscale ssh admin@tag:pi \
+          sudo tailscale ssh admin@livingroompi \
             PIHOLE_WEBPASSWORD="$PIHOLE_WEBPASSWORD" \
             DAKBOARD_URL="$DAKBOARD_URL" \
             'bash -s' << 'EOF'
