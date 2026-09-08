@@ -13,6 +13,35 @@ split cleanly.
 | Living-room kiosk (DAKboard) | Pi | LightDM autologin (`admin`) → labwc → native Chromium, HDMI |
 | DAKboard backend | DAKboard cloud | External (not yet self-hosted) |
 
+## Phase status (Phase 1: one Pi, rock-solid)
+
+Phase 1 must be *verified*, not just *built*, before adding the homelab node or k3s.
+
+| Item | Status |
+| --- | --- |
+| Kiosk boot chain (LightDM → labwc → chromium → DAKboard) | ✅ Live and stable |
+| Pi-hole container serving LAN DNS on :53 | ✅ Live |
+| GitOps deploy over Tailscale SSH | ✅ Working |
+| Nightly reboot timer (04:30) | ✅ Enabled on the live Pi |
+| Docs match deployed reality | ✅ Realigned to labwc/LightDM |
+| Pi-hole v6 admin password wired correctly | ✅ Fixed (`FTLCONF_webserver_api_password`) |
+| Container health signal trustworthy | ✅ Fixed (inherit image DNS healthcheck) |
+| Tailscale MagicDNS resolves `livingroompi` from laptop | ⚠️ Open — laptop has `accept-dns=false` |
+| Fresh-microSD reproducibility test | ⏳ Pending spare hardware |
+
+### Version-drift lesson (carry this forward)
+
+Pi-hole v5 → v6 renamed the password variable (`WEBPASSWORD` →
+`FTLCONF_webserver_api_password`) and replaced the HTTP healthcheck with a
+DNS-native one. Both drifted silently: the password was never applied and the
+container reported `unhealthy` for ~29,000 consecutive checks while working fine.
+
+**Rule:** when a container image crosses a major version, re-read its env-var and
+healthcheck contract before assuming the compose file still applies. Prefer the
+image's built-in healthcheck over a hand-written one — it is maintained upstream
+and tests the service's actual job. This matters more under k3s, where liveness
+and readiness probes act on that signal instead of just printing a status string.
+
 ## Documentation discipline for painless migration
 
 For migrations to stay low-risk, keep this separation strict:
@@ -61,9 +90,12 @@ If an infra/config/process change is made, update docs in the same commit.
    ```
 5. Validate locally on new host:
    ```bash
-   docker ps | grep pihole
-   curl -f http://localhost:8080/admin -s --max-time 5 && echo "Pi-hole UI OK"
+   docker ps --format '{{.Names}}\t{{.Status}}' | grep pihole   # expect "healthy"
+   docker exec pihole dig +short +norecurse +retry=0 @127.0.0.1 pi.hole
+   curl -f -s -o /dev/null --max-time 5 http://localhost:8080/admin/ && echo "Pi-hole UI OK"
    ```
+   The DNS query is the authoritative check — the UI responding does not prove
+   resolution works.
 6. Repoint router DHCP DNS and Tailscale MagicDNS to the new host IP.
 7. Monitor clients and logs; once stable, retire old Pi-hole instance.
 

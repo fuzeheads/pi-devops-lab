@@ -13,8 +13,7 @@ services:
       - "./etc-pihole:/etc/pihole"
       - "./etc-dnsmasq.d:/etc/dnsmasq.d"
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
+    # No healthcheck override on purpose: the pihole/pihole v6 image ships a
+    # DNS-native check (dig @127.0.0.1 pi.hole), which actually tests the
+    # service's job. The old `curl -f http://localhost` override returned 403 on
+    # v6 and kept the container permanently "unhealthy".
