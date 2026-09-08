@@ -10,18 +10,27 @@ split cleanly.
 | Role | Runs on | How |
 | --- | --- | --- |
 | DNS ad-blocking (Pi-hole) | Pi | Container, deployed via GitHub Actions |
-| Living-room kiosk (DAKboard) | Pi | Native Chromium via Wayfire, HDMI |
+| Living-room kiosk (DAKboard) | Pi | LightDM autologin (`admin`) → labwc → native Chromium, HDMI |
 | DAKboard backend | DAKboard cloud | External (not yet self-hosted) |
+
+## Documentation discipline for painless migration
+
+For migrations to stay low-risk, keep this separation strict:
+
+- **Git-tracked state (portable):** compose files, bootstrap scripts, kiosk templates, systemd units, docs.
+- **Runtime host state (not in Git):** container bind mounts/volumes (`docker/pi-hole/etc-pihole/`, `docker/pi-hole/etc-dnsmasq.d/`), system packages, host networking.
+- **Secrets (never in Git):** `.env` values, GitHub Actions secrets (`PIHOLE_WEBPASSWORD`, `DAKBOARD_URL`, `TAILSCALE_AUTHKEY`).
+
+If an infra/config/process change is made, update docs in the same commit.
 
 ## DNS architecture: now → later
 
 - **Now:** Pi-hole owns port 53 on the Pi (systemd-resolved stub listener disabled).
   Clients get Pi-hole as DNS via **router DHCP** (whole LAN, new devices inherit
   ad-blocking automatically) **and** via **Tailscale MagicDNS** (follows you off-home).
-- **Later:** Pi-hole migrates to the main node. Because its config lives in Git
-  (`etc-pihole` volume + compose), migration is: clone repo on the new node,
-  `docker compose up -d`, then repoint router DHCP + MagicDNS at the new IP.
-  **No redesign — just a target swap.**
+- **Later:** Pi-hole migrates to another host. Because config is Git-defined,
+  migration is: clone repo on the new host, set env, `docker compose up -d`, then
+  repoint router DHCP + MagicDNS at the new IP. **No redesign — just a target swap.**
 
 ## Target state (split & conquer)
 
@@ -30,8 +39,49 @@ split cleanly.
 | Pi-hole (DNS) | **Main node** | More reliable, always-on host |
 | Nextcloud (storage) | **Main node** | Born on its final host to avoid moving stateful data twice; needs Restic/Borg backups |
 | Traefik (reverse proxy) | **Main node** | Owns 80/443, routes by hostname — resolves web-port contention when multiple web apps exist |
-| DAKboard backend (optional) | **Main node** | Self-hosted in a container; kiosk just repoints to the new URL |
+| Backend dashboards/services | **Main node** | Pi kiosk can repoint by changing only `DAKBOARD_URL` secret |
 | Kiosk (Chromium) | **Stays on the Pi** | The Pi has the HDMI cable to the living-room monitor |
+
+## Pi-hole host migration checklist (actionable)
+
+1. On target host, install Docker + Docker Compose plugin.
+2. Clone this repo:
+   ```bash
+   git clone https://github.com/fuzeheads/pi-devops-lab.git
+   cd pi-devops-lab/docker/pi-hole
+   ```
+3. Create `.env` from template and fill values:
+   ```bash
+   cp .env.template .env
+   ```
+4. Start Pi-hole:
+   ```bash
+   docker compose pull
+   docker compose up -d
+   ```
+5. Validate locally on new host:
+   ```bash
+   docker ps | grep pihole
+   curl -f http://localhost:8080/admin -s --max-time 5 && echo "Pi-hole UI OK"
+   ```
+6. Repoint router DHCP DNS and Tailscale MagicDNS to the new host IP.
+7. Monitor clients and logs; once stable, retire old Pi-hole instance.
+
+## Display/server split checklist (Pi stays display-only)
+
+- Keep the Pi attached to HDMI and running only the kiosk session.
+- Move server-side containers (Pi-hole now, Nextcloud later) to homelab machines.
+- If backend URL changes, only update the `DAKBOARD_URL` GitHub Actions secret and redeploy.
+- Pipeline injects the URL into `~/.config/labwc/autostart`; no manual Pi edits required.
+
+## Fresh microSD reproducibility test (pending hardware)
+
+**TODO (pending spare hardware):** run a full fresh-microSD validation and capture results here:
+
+- Flash new card, run bootstrap, verify LightDM autologin → labwc → Chromium kiosk.
+- Run deploy workflow and verify Pi-hole + kiosk URL injection.
+- Confirm nightly reboot timer and post-reboot service recovery.
+- Record elapsed time, issues found, and any doc updates needed.
 
 ## Kubernetes roadmap (Rancher + Fleet)
 

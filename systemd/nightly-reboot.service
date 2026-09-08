@@ -5,7 +5,7 @@
 # need this at all — the plug's power cycle acts as the reboot.
 #
 # Everything self-heals on boot: Docker (enabled) -> Pi-hole (restart: unless-stopped)
-# -> Wayfire -> Chromium -> DAKboard. So an unattended reboot is safe.
+# -> LightDM autologin -> labwc -> Chromium -> DAKboard. So an unattended reboot is safe.
 
 [Unit]
 Description=Nightly reboot to keep the Pi responsive
