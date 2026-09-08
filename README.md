@@ -2,7 +2,7 @@
 
 A homelab DevOps lab on a single **Raspberry Pi 4** that plays two roles at once:
 
-1. **Living-room kiosk** — a wall-mounted HDMI display showing **DAKboard** (Google Calendar + weather + Google Keep notes), driven by native Chromium via Wayfire.
+1. **Living-room kiosk** — a wall-mounted HDMI display showing **DAKboard** (Google Calendar + weather + Google Keep notes), driven by native Chromium via **LightDM autologin + labwc**.
 2. **Containerized homelab node** — **Pi-hole** (network-wide DNS ad-blocking) running in Docker, deployed via GitHub Actions over a Tailscale tunnel.
 
 Scope is deliberately kept to **one Pi, one service (Pi-hole), one kiosk, one GitOps pipeline** — rock-solid before scaling to the main homelab node and Kubernetes (Rancher + Fleet).
@@ -14,7 +14,7 @@ Scope is deliberately kept to **one Pi, one service (Pi-hole), one kiosk, one Gi
 ## 🧭 Design principles
 
 - **Containerize services; keep the display native.** Pi-hole (and later DAKboard's backend) are containers. The kiosk browser is native Chromium because it must reliably drive the Pi's physical HDMI on every boot — a containerized browser rendering to real HDMI on a Pi is fragile.
-- **Everything version-controlled in Git**, even the native bits (`kiosk/wayfire.ini`).
+- **Everything version-controlled in Git**, even the native bits (`kiosk/labwc-autostart`, `kiosk/lightdm-autologin.conf`).
 - **Secrets: rotate, never recover.** GitHub secrets are write-only. If you don't know a secret's value, replace it — don't try to read it.
 - **Self-healing on reboot.** A power cycle (smart plug) or nightly reboot must bring back DNS + the calendar with zero manual steps.
 
@@ -25,14 +25,14 @@ Scope is deliberately kept to **one Pi, one service (Pi-hole), one kiosk, one Gi
 ```
 Push to main → GitHub Actions → Tailscale SSH → Pi:
    ├─ docker compose up  → Pi-hole (DNS, container)
-   └─ render DAKBOARD_URL → ~/.config/wayfire.ini (native kiosk)
+   └─ render DAKBOARD_URL → ~/.config/labwc/autostart (native kiosk)
 
-On boot: Docker → Pi-hole (DNS live) → Wayfire → Chromium → DAKboard on the wall
+On boot: LightDM autologin (admin) → labwc → chromium --kiosk → DAKboard on the wall
 ```
 
 | Layer | Technology |
 | --- | --- |
-| Host OS | Raspberry Pi OS 64-bit (Desktop / Wayfire) |
+| Host OS | Raspberry Pi OS / Debian 13 (trixie), LightDM + labwc |
 | Network | TP-Link Archer BE550 (DHCP reservation for the Pi) |
 | Access | Key-based SSH (`ed25519`), Tailscale mesh + SSH |
 | Orchestration | Docker Compose (interim; → k3s / Rancher Fleet later) |
@@ -50,11 +50,12 @@ pi-devops-lab/
 │   ├── docker-compose.yml
 │   └── .env.template
 ├── kiosk/                         # Native kiosk (Git-controlled)
-│   ├── wayfire.ini                # Autostart Chromium → DAKboard (URL injected)
+│   ├── labwc-autostart            # Autostart Chromium → DAKboard (URL injected)
+│   ├── lightdm-autologin.conf     # LightDM autologin into labwc (user: admin)
 │   └── README.md
 ├── systemd/                       # Host units
 │   ├── nightly-reboot.service
-│   └── nightly-reboot.timer       # Optional scheduled reboot
+│   └── nightly-reboot.timer
 ├── scripts/pi-bootstrap.sh        # One-shot Pi provisioning (idempotent)
 ├── docs/migration.md              # Pi → main node → k8s migration plan
 └── README.md
@@ -91,7 +92,7 @@ Legend: **💻 LAPTOP** = your computer/browser · **🍓 PI** = terminal on the
    ```
 2. **💻 LAPTOP** — Tailscale admin → **Access Controls**: ensure `tag:pi` exists with you as `tagOwner`. *(Already configured for this lab.)*
 3. **💻 LAPTOP** — GitHub → Secrets → Actions: set `TAILSCALE_AUTHKEY`, `PIHOLE_WEBPASSWORD`, `DAKBOARD_URL` (see table above).
-4. **🍓 PI** — run the one-shot bootstrap (port-53 fix, Docker, boot-enable, clone, kiosk config):
+4. **🍓 PI** — run the one-shot bootstrap (port-53 fix, Docker, repo clone/update, kiosk packages + config, LightDM autologin, nightly-reboot timer):
    ```bash
    curl -fsSL https://raw.githubusercontent.com/fuzeheads/pi-devops-lab/main/scripts/pi-bootstrap.sh | bash
    ```
@@ -108,11 +109,13 @@ Legend: **💻 LAPTOP** = your computer/browser · **🍓 PI** = terminal on the
 
 ### Phase 2 — Living-room calendar (the main goal)
 
-8. **💻 LAPTOP** — build your **DAKboard** dashboard (Google Calendar + weather + Keep), copy the **display URL**, save it as the `DAKBOARD_URL` secret, and re-run the workflow so it's injected into `wayfire.ini`.
+8. **💻 LAPTOP** — build your **DAKboard** dashboard (Google Calendar + weather + Keep), copy the **display URL**, save it as the `DAKBOARD_URL` secret, and re-run the workflow so it is injected into `~/.config/labwc/autostart`.
 9. **🍓 PI** — reboot and confirm the wall shows DAKboard:
    ```bash
    sudo reboot
    ```
+
+> ℹ️ On trixie the kiosk browser binary is `chromium` (not `chromium-browser`).
 
 ---
 
@@ -125,19 +128,20 @@ Legend: **💻 LAPTOP** = your computer/browser · **🍓 PI** = terminal on the
 
 ## ♻️ Reboot resilience
 
-The Pi must return to a working state after any restart (smart-plug power cycle or the optional nightly reboot) with **no manual steps**:
+The Pi must return to a working state after any restart (smart-plug power cycle or nightly reboot) with **no manual steps**:
 
 1. **Docker** is enabled at boot → starts automatically.
 2. **Pi-hole** has `restart: unless-stopped` → relaunches → DNS live.
 3. **Port 53** fix is persistent in `/etc/systemd/resolved.conf`.
-4. **Wayfire** autostarts **Chromium** → DAKboard fills the screen.
+4. **LightDM autologin** starts `admin` into **labwc**, and `~/.config/labwc/autostart` launches **chromium** with `--kiosk --password-store=basic --ozone-platform=wayland` to show DAKboard.
 
-Optional nightly reboot (keeps the Pi snappy) via `systemd/nightly-reboot.timer`:
+Nightly reboot (keeps the Pi snappy) is enabled by default at **04:30** by `systemd/nightly-reboot.timer` and is still overridable during bootstrap:
 ```bash
-ENABLE_NIGHTLY_REBOOT=yes bash ~/pi-devops-lab/scripts/pi-bootstrap.sh
+ENABLE_NIGHTLY_REBOOT=no bash ~/pi-devops-lab/scripts/pi-bootstrap.sh  # opt out
 # or: sudo cp systemd/nightly-reboot.* /etc/systemd/system/ && sudo systemctl enable --now nightly-reboot.timer
 ```
-> If your smart plug already power-cycles the Pi/monitor overnight, you may not need the timer at all.
+
+This is safe for Pi-hole because Docker is enabled at boot and the container restarts automatically.
 
 ---
 
@@ -164,7 +168,7 @@ ENABLE_NIGHTLY_REBOOT=yes bash ~/pi-devops-lab/scripts/pi-bootstrap.sh
 **Rebuild from zero:**
 1. Flash a fresh SD (Raspberry Pi Imager): hostname `livingroompi`, inject your SSH public key, disable password auth.
 2. Restore the router DHCP reservation for the Pi (or re-add by MAC).
-3. **🍓 PI:** run the bootstrap one-liner (Phase 0, step 4).
+3. **🍓 PI:** run the bootstrap one-liner (Phase 0, step 4). It installs `labwc`, `swaybg`, `chromium`, `wlr-randr`, kiosk autostart, LightDM autologin, and nightly reboot.
 4. **🍓 PI:** `sudo tailscale up --advertise-tags=tag:pi --ssh --hostname livingroompi`.
 5. **💻 LAPTOP:** confirm the three secrets exist (rotate `TAILSCALE_AUTHKEY` if expired), push to `main`.
 

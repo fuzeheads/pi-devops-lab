@@ -11,7 +11,7 @@
 #   4. Clones (or updates) this repo to ~/pi-devops-lab.
 #   5. Installs the native kiosk (Chromium via labwc autostart) that boots into DAKboard,
 #      and configures LightDM autologin so the kiosk starts unattended on every boot.
-#   6. Optionally installs the nightly-reboot systemd timer.
+#   6. Installs the nightly-reboot systemd timer by default (opt-out).
 #
 # RUN THIS ON THE PI (over SSH), NOT on your laptop:
 #   curl -fsSL https://raw.githubusercontent.com/fuzeheads/pi-devops-lab/main/scripts/pi-bootstrap.sh | bash
@@ -22,7 +22,7 @@ set -euo pipefail
 
 REPO_URL="https://github.com/fuzeheads/pi-devops-lab.git"
 REPO_DIR="${HOME}/pi-devops-lab"
-ENABLE_NIGHTLY_REBOOT="${ENABLE_NIGHTLY_REBOOT:-no}"   # set to "yes" to install the timer
+ENABLE_NIGHTLY_REBOOT="${ENABLE_NIGHTLY_REBOOT:-yes}"   # set to "no" to skip the timer
 
 log() { printf '\n\033[1;32m==>\033[0m %s\n' "$*"; }
 
@@ -123,7 +123,7 @@ sudo usermod -aG autologin admin
 sudo systemctl set-default graphical.target
 
 # ---------------------------------------------------------------------------
-# 5. Optional: nightly reboot timer (keeps the Pi snappy)
+# 5. Nightly reboot timer (keeps the Pi snappy; enabled by default)
 # ---------------------------------------------------------------------------
 if [ "${ENABLE_NIGHTLY_REBOOT}" = "yes" ]; then
   log "Installing nightly-reboot systemd timer"
